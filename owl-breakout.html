@@ -88,19 +88,18 @@ function resizeCanvas() {
 // ゲームオブジェクトの定義
 // =================================================================================
 
-// パドル
+// パドル (フクロウのデザインに変更)
 const paddle = {
-    width: 100,
-    height: 20,
-    x: (GAME_WIDTH - 100) / 2,
-    y: GAME_HEIGHT - 40,
+    width: 120,
+    height: 30,
+    x: (GAME_WIDTH - 120) / 2,
+    y: GAME_HEIGHT - 50,
     speed: 8,
     dx: 0,
-    color: '#e0e0e0',
-    originalWidth: 100,
+    originalWidth: 120,
 };
 
-// ボール
+// ボール (卵のデザインに変更)
 const ball = {
     x: GAME_WIDTH / 2,
     y: GAME_HEIGHT / 2,
@@ -108,7 +107,6 @@ const ball = {
     speed: 4,
     dx: 4,
     dy: -4,
-    color: '#ffd700', // 金色
 };
 
 // ブロック
@@ -118,8 +116,8 @@ const brickInfo = {
     padding: 10,
     offsetTop: 50,
     offsetLeft: 30,
-    colors: ['#1e90ff', '#ff69b4', '#32cd32'], // 青、ピンク、緑
-    hardColor: '#b0c4de' // 硬いブロックの色
+    colors: ['#228B22', '#8B4513', '#CD853F'], // 森や木をイメージした色
+    hardColor: '#A9A9A9' // 硬いブロックの色 (石)
 };
 
 let bricks = [];
@@ -228,7 +226,6 @@ function resetLevel() {
 function drawStars() {
     ctx.fillStyle = 'white';
     for (let i = 0; i < 100; i++) {
-        // 星の位置を固定するためにシード値を使う
         const x = (Math.sin(i * 1.23) * GAME_WIDTH + GAME_WIDTH) % GAME_WIDTH;
         const y = (Math.cos(i * 3.45) * GAME_HEIGHT + GAME_HEIGHT) % GAME_HEIGHT;
         const radius = Math.sin(i * 5.67) * 0.5 + 0.5;
@@ -238,38 +235,89 @@ function drawStars() {
     }
 }
 
-// パドルを描画
-function drawPaddle() {
-    ctx.fillStyle = paddle.color;
+// 背景に大きなフクロウを描画
+function drawBackgroundOwl() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'; // 半透明の白
+
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2 - 50;
+
+    // 頭
     ctx.beginPath();
-    ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 10);
+    ctx.arc(centerX, centerY, 150, 0, Math.PI * 2);
     ctx.fill();
-    
-    // パドルにフクロウの顔を描画
-    ctx.fillStyle = '#333';
+
+    // 目
     ctx.beginPath();
-    ctx.arc(paddle.x + paddle.width / 2 - 15, paddle.y + 10, 5, 0, Math.PI * 2); // 左目
-    ctx.arc(paddle.x + paddle.width / 2 + 15, paddle.y + 10, 5, 0, Math.PI * 2); // 右目
+    ctx.arc(centerX - 60, centerY, 40, 0, Math.PI * 2);
+    ctx.arc(centerX + 60, centerY, 40, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 体
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY + 200, 120, 180, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+// パドル（フクロウ）を描画
+function drawPaddle() {
+    const x = paddle.x;
+    const y = paddle.y;
+    const w = paddle.width;
+    const h = paddle.height;
+
+    // 羽と体
+    ctx.fillStyle = '#8B4513'; // 茶色
+    ctx.beginPath();
+    ctx.moveTo(x, y + h / 2);
+    ctx.quadraticCurveTo(x + w / 2, y - h, x + w, y + h / 2);
+    ctx.quadraticCurveTo(x + w / 2, y + h * 1.5, x, y + h / 2);
+    ctx.fill();
+
+    // 顔の部分
+    ctx.fillStyle = '#F5DEB3'; // 明るい茶色
+    ctx.beginPath();
+    ctx.arc(x + w / 2, y + h / 2, w / 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 目
+    const eyeX1 = x + w / 2 - 15;
+    const eyeX2 = x + w / 2 + 15;
+    const eyeY = y + h / 2;
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.arc(eyeX1, eyeY, 8, 0, Math.PI * 2);
+    ctx.arc(eyeX2, eyeY, 8, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = 'white';
     ctx.beginPath();
-    ctx.arc(paddle.x + paddle.width / 2 - 15, paddle.y + 10, 2, 0, Math.PI * 2); // 左目の光
-    ctx.arc(paddle.x + paddle.width / 2 + 15, paddle.y + 10, 2, 0, Math.PI * 2); // 右目の光
+    ctx.arc(eyeX1 + 2, eyeY - 2, 2, 0, Math.PI * 2);
+    ctx.arc(eyeX2 + 2, eyeY - 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // くちばし
+    ctx.fillStyle = 'orange';
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, y + h / 2 + 5);
+    ctx.lineTo(x + w / 2 - 5, y + h / 2 + 15);
+    ctx.lineTo(x + w / 2 + 5, y + h / 2 + 15);
+    ctx.closePath();
     ctx.fill();
 }
 
-// ボールを描画
+// ボール（卵）を描画
 function drawBall() {
+    ctx.fillStyle = '#f0f8ff'; // エッグシェルカラー
     ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-    ctx.fillStyle = ball.color;
+    // 少し縦長の楕円にする
+    ctx.ellipse(ball.x, ball.y, ball.radius * 0.85, ball.radius, 0, 0, Math.PI * 2);
     ctx.fill();
-    // ボールに羽模様を追加
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.beginPath();
-    ctx.arc(ball.x - 3, ball.y - 3, ball.radius * 0.8, Math.PI * 1.2, Math.PI * 1.8);
-    ctx.arc(ball.x + 3, ball.y + 3, ball.radius * 0.8, Math.PI * 0.2, Math.PI * 0.8);
-    ctx.fill();
+    // 影をつけて立体感を出す
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
 }
 
 // ブロックを描画
@@ -281,10 +329,18 @@ function drawBricks() {
             ctx.roundRect(brick.x, brick.y, brick.width, brick.height, 5);
             ctx.fill();
 
+            // 木目のような模様を追加
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(brick.x + 5, brick.y + 5);
+            ctx.quadraticCurveTo(brick.x + brick.width / 2, brick.y + brick.height / 2, brick.x + 5, brick.y + brick.height - 5);
+            ctx.stroke();
+
             if (brick.status === 2) { // 硬いブロックの表現
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
                 ctx.lineWidth = 2;
-                ctx.stroke();
+                ctx.strokeRect(brick.x, brick.y, brick.width, brick.height);
             }
             if (brick.hasItem) { // アイテム持ちブロックの表現
                 ctx.fillStyle = 'yellow';
@@ -384,10 +440,14 @@ function drawUI() {
 
 function drawTitleScreen() {
     drawStars();
+    drawBackgroundOwl();
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 48px Arial';
+    ctx.shadowColor = 'black';
+    ctx.shadowBlur = 10;
     ctx.fillText('フクロウのブロック崩し', GAME_WIDTH / 2, GAME_HEIGHT / 3);
+    ctx.shadowBlur = 0;
     
     ctx.font = '24px Arial';
     ctx.fillText('画面をタップして開始', GAME_WIDTH / 2, GAME_HEIGHT / 2);
@@ -399,10 +459,14 @@ function drawTitleScreen() {
 
 function drawStageSelectScreen() {
     drawStars();
+    drawBackgroundOwl();
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 36px Arial';
+    ctx.shadowColor = 'black';
+    ctx.shadowBlur = 7;
     ctx.fillText('ステージ選択', GAME_WIDTH / 2, GAME_HEIGHT / 4);
+    ctx.shadowBlur = 0;
 
     for (let i = 0; i < stages.length; i++) {
         const btnY = GAME_HEIGHT / 2.5 + i * 80;
@@ -659,6 +723,7 @@ function draw() {
     ctx.fillStyle = '#0f0f1a';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     drawStars();
+    drawBackgroundOwl(); // 背景のフクロウを描画
 
     if (gameState === 'title') {
         drawTitleScreen();
