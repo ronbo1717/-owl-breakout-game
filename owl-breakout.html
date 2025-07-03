@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>フクロウのブロック崩し</title>
+    <style>
+        /* 基本的なスタイル設定 */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a2e; /* 夜空のような背景色 */
+            color: #e0e0e0;
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        /* ゲームキャンバスのスタイル */
+        canvas {
+            background-color: #0f0f1a;
+            display: block;
+            touch-action: none; /* スマホでのタッチ操作の遅延を防ぐ */
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// =================================================================================
+// ゲーム全体の設定
+// =================================================================================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ゲームの基本サイズ（このサイズを基準にレスポンシブ対応）
+const GAME_WIDTH = 480;
+const GAME_HEIGHT = 720;
+
+// ゲームの状態を管理する変数
+let gameState = 'title'; // title, stageSelect, playing, stageClear, gameClear, gameOver
+
+// プレイヤーのスコアとライフ
+let score = 0;
+let lives = 3;
+let currentStage = 0;
+
+// フクロウの救助機能が使えるかどうか
+let owlRescueAvailable = true;
+
+// =================================================================================
+// レスポンシブ対応
+// =================================================================================
+
+function resizeCanvas() {
+    const aspectRatio = GAME_WIDTH / GAME_HEIGHT;
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
+    const screenAspectRatio = screenWidth / screenHeight;
+
+    let newWidth, newHeight;
+
+    if (screenAspectRatio > aspectRatio) {
+        newHeight = screenHeight;
+        newWidth = newHeight * aspectRatio;
+    } else {
+        newWidth = screenWidth;
+        newHeight = newWidth / aspectRatio;
+    }
+
+    canvas.width = newWidth;
+    canvas.height = newHeight;
+    
+    // CSSで中央揃えしているので、ここではサイズ設定のみ
+    ctx.scale(newWidth / GAME_WIDTH, newHeight / GAME_HEIGHT);
+}
+
+// =================================================================================
+// ゲームオブジェクトの定義
+// =================================================================================
+
+// パドル
+const paddle = {
+    width: 100,
+    height: 20,
+    x: (GAME_WIDTH - 100) / 2,
+    y: GAME_HEIGHT - 40,
+    speed: 8,
+    dx: 0,
+    color: '#e0e0e0',
+    originalWidth: 100,
+};
+
+// ボール
+const ball = {
+    x: GAME_WIDTH / 2,
+    y: GAME_HEIGHT / 2,
+    radius: 10,
+    speed: 4,
+    dx: 4,
+    dy: -4,
+    color: '#ffd700', // 金色
+};
+
+// ブロック
+const brickInfo = {
+    width: 60,
+    height: 20,
+    padding: 10,
+    offsetTop: 50,
+    offsetLeft: 30,
+    colors: ['#1e90ff', '#ff69b4', '#32cd32'], // 青、ピンク、緑
+    hardColor: '#b0c4de' // 硬いブロックの色
+};
+
+let bricks = [];
+
+// ステージデータ
+const stages = [
+    // Stage 1
+    [
+        [1, 1, 1, 1, 1],
+        [1, 2, 1, 2, 1],
+        [0, 1, 3, 1, 0],
+    ],
+    // Stage 2
+    [
+        [2, 1, 3, 1, 2],
+        [1, 2, 1, 2, 1],
+        [1, 1, 1, 1, 1],
+        [0, 2, 3, 2, 0],
+    ],
+    // Stage 3
+    [
+        [2, 2, 3, 2, 2],
+        [2, 1, 1, 1, 2],
+        [1, 1, 3, 1, 1],
+        [1, 2, 1, 2, 1],
+        [3, 0, 2, 0, 3],
+    ]
+];
+
+// アイテム
+let items = [];
+const itemTypes = [
+    { type: 'expandPaddle', color: '#32cd32', symbol: 'W' }, // パドル幅拡大
+    { type: 'slowBall', color: '#1e90ff', symbol: 'S' },     // ボール速度低下
+    { type: 'extraLife', color: '#ff69b4', symbol: '♥' }      // ライフ追加
+];
+
+// フクロウ
+const owl = {
+    x: GAME_WIDTH / 2,
+    y: -60,
+    width: 60,
+    height: 50,
+    isRescuing: false,
+    animationFrame: 0
+};
+
+// =================================================================================
+// ゲームの初期化・リセット
+// =================================================================================
+
+// ステージを生成する関数
+function createBricks() {
+    bricks = [];
+    const stageLayout = stages[currentStage];
+    stageLayout.forEach((row, r) => {
+        row.forEach((col, c) => {
+            if (col > 0) {
+                bricks.push({
+                    x: brickInfo.offsetLeft + c * (brickInfo.width + brickInfo.padding),
+                    y: brickInfo.offsetTop + r * (brickInfo.height + brickInfo.padding),
+                    width: brickInfo.width,
+                    height: brickInfo.height,
+                    status: col, // 1: 通常, 2: 硬い, 3: アイテム持ち
+                    color: col === 2 ? brickInfo.hardColor : brickInfo.colors[r % brickInfo.colors.length],
+                    hasItem: col === 3
+                });
+            }
+        });
+    });
+}
+
+// ボールとパドルをリセット
+function resetBallAndPaddle() {
+    ball.x = GAME_WIDTH / 2;
+    ball.y = paddle.y - ball.radius - 5;
+    ball.speed = 4 + currentStage; // ステージごとに少し速く
+    ball.dx = ball.speed * (Math.random() > 0.5 ? 1 : -1);
+    ball.dy = -ball.speed;
+    paddle.x = (GAME_WIDTH - paddle.originalWidth) / 2;
+    paddle.width = paddle.originalWidth;
+}
+
+// ゲーム全体をリセット
+function resetGame() {
+    score = 0;
+    lives = 3;
+    currentStage = 0;
+    gameState = 'title';
+    resetLevel();
+}
+
+// レベル（ステージ）をリセット
+function resetLevel() {
+    owlRescueAvailable = true;
+    items = [];
+    resetBallAndPaddle();
+    createBricks();
+}
+
+// =================================================================================
+// 描画関数
+// =================================================================================
+
+// 背景の星を描画
+function drawStars() {
+    ctx.fillStyle = 'white';
+    for (let i = 0; i < 100; i++) {
+        // 星の位置を固定するためにシード値を使う
+        const x = (Math.sin(i * 1.23) * GAME_WIDTH + GAME_WIDTH) % GAME_WIDTH;
+        const y = (Math.cos(i * 3.45) * GAME_HEIGHT + GAME_HEIGHT) % GAME_HEIGHT;
+        const radius = Math.sin(i * 5.67) * 0.5 + 0.5;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// パドルを描画
+function drawPaddle() {
+    ctx.fillStyle = paddle.color;
+    ctx.beginPath();
+    ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 10);
+    ctx.fill();
+    
+    // パドルにフクロウの顔を描画
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(paddle.x + paddle.width / 2 - 15, paddle.y + 10, 5, 0, Math.PI * 2); // 左目
+    ctx.arc(paddle.x + paddle.width / 2 + 15, paddle.y + 10, 5, 0, Math.PI * 2); // 右目
+    ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(paddle.x + paddle.width / 2 - 15, paddle.y + 10, 2, 0, Math.PI * 2); // 左目の光
+    ctx.arc(paddle.x + paddle.width / 2 + 15, paddle.y + 10, 2, 0, Math.PI * 2); // 右目の光
+    ctx.fill();
+}
+
+// ボールを描画
+function drawBall() {
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fillStyle = ball.color;
+    ctx.fill();
+    // ボールに羽模様を追加
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.beginPath();
+    ctx.arc(ball.x - 3, ball.y - 3, ball.radius * 0.8, Math.PI * 1.2, Math.PI * 1.8);
+    ctx.arc(ball.x + 3, ball.y + 3, ball.radius * 0.8, Math.PI * 0.2, Math.PI * 0.8);
+    ctx.fill();
+}
+
+// ブロックを描画
+function drawBricks() {
+    bricks.forEach(brick => {
+        if (brick.status > 0) {
+            ctx.fillStyle = brick.color;
+            ctx.beginPath();
+            ctx.roundRect(brick.x, brick.y, brick.width, brick.height, 5);
+            ctx.fill();
+
+            if (brick.status === 2) { // 硬いブロックの表現
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            if (brick.hasItem) { // アイテム持ちブロックの表現
+                ctx.fillStyle = 'yellow';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('★', brick.x + brick.width / 2, brick.y + brick.height / 2 + 5);
+            }
+        }
+    });
+}
+
+// アイテムを描画
+function drawItems() {
+    items.forEach(item => {
+        const itemInfo = itemTypes.find(it => it.type === item.type);
+        ctx.fillStyle = itemInfo.color;
+        ctx.beginPath();
+        ctx.arc(item.x, item.y, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 18px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(itemInfo.symbol, item.x, item.y);
+    });
+}
+
+// フクロウを描画
+function drawOwl() {
+    if (!owl.isRescuing) return;
+
+    const t = owl.animationFrame / 60; // 1秒間のアニメーション
+
+    // 体
+    ctx.fillStyle = '#8B4513'; // 茶色
+    ctx.beginPath();
+    ctx.ellipse(owl.x, owl.y, owl.width / 2, owl.height / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // お腹
+    ctx.fillStyle = '#F5DEB3'; // 小麦色
+    ctx.beginPath();
+    ctx.ellipse(owl.x, owl.y + 10, owl.width / 3, owl.height / 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 目
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(owl.x - 15, owl.y - 5, 12, 0, Math.PI * 2);
+    ctx.arc(owl.x + 15, owl.y - 5, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.arc(owl.x - 15, owl.y - 5, 5, 0, Math.PI * 2);
+    ctx.arc(owl.x + 15, owl.y - 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // くちばし
+    ctx.fillStyle = 'orange';
+    ctx.beginPath();
+    ctx.moveTo(owl.x, owl.y);
+    ctx.lineTo(owl.x - 5, owl.y + 10);
+    ctx.lineTo(owl.x + 5, owl.y + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // 羽 (アニメーション)
+    const wingAngle = Math.sin(t * Math.PI * 4) * 0.5; // パタパタさせる
+    ctx.fillStyle = '#A0522D'; // 少し濃い茶色
+    ctx.beginPath();
+    ctx.ellipse(owl.x - 30, owl.y, 15, 25, -0.5 + wingAngle, 0, Math.PI * 2);
+    ctx.ellipse(owl.x + 30, owl.y, 15, 25, 0.5 - wingAngle, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+
+// UI（スコアやライフ）を描画
+function drawUI() {
+    ctx.fillStyle = '#e0e0e0';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`スコア: ${score}`, 10, 30);
+    
+    ctx.textAlign = 'right';
+    ctx.fillText(`ステージ: ${currentStage + 1}`, GAME_WIDTH - 10, 30);
+
+    // ライフをハートで表示
+    ctx.fillStyle = '#ff69b4';
+    for (let i = 0; i < lives; i++) {
+        ctx.fillText('♥', GAME_WIDTH / 2 + (i - (lives-1)/2) * 30, 30);
+    }
+}
+
+// =================================================================================
+// 画面ごとの描画
+// =================================================================================
+
+function drawTitleScreen() {
+    drawStars();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Arial';
+    ctx.fillText('フクロウのブロック崩し', GAME_WIDTH / 2, GAME_HEIGHT / 3);
+    
+    ctx.font = '24px Arial';
+    ctx.fillText('画面をタップして開始', GAME_WIDTH / 2, GAME_HEIGHT / 2);
+
+    ctx.font = '18px Arial';
+    ctx.fillText('PC: マウスでパドルを操作', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50);
+    ctx.fillText('スマホ: スワイプでパドルを操作', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 80);
+}
+
+function drawStageSelectScreen() {
+    drawStars();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px Arial';
+    ctx.fillText('ステージ選択', GAME_WIDTH / 2, GAME_HEIGHT / 4);
+
+    for (let i = 0; i < stages.length; i++) {
+        const btnY = GAME_HEIGHT / 2.5 + i * 80;
+        ctx.fillStyle = '#1e90ff';
+        ctx.beginPath();
+        ctx.roundRect(GAME_WIDTH / 2 - 100, btnY, 200, 60, 15);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 28px Arial';
+        ctx.fillText(`ステージ ${i + 1}`, GAME_WIDTH / 2, btnY + 40);
+    }
+}
+
+function drawStageClearScreen() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 48px Arial';
+    ctx.fillText('ステージクリア！', GAME_WIDTH / 2, GAME_HEIGHT / 3);
+    ctx.fillStyle = '#fff';
+    ctx.font = '24px Arial';
+    ctx.fillText(`スコア: ${score}`, GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    ctx.fillText('タップして次へ', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50);
+}
+
+function drawGameClearScreen() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 48px Arial';
+    ctx.fillText('ゲームクリア！', GAME_WIDTH / 2, GAME_HEIGHT / 3);
+    ctx.font = 'bold 32px Arial';
+    ctx.fillText('おめでとう！', GAME_WIDTH / 2, GAME_HEIGHT / 3 + 60);
+    ctx.fillStyle = '#fff';
+    ctx.font = '24px Arial';
+    ctx.fillText(`最終スコア: ${score}`, GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20);
+    ctx.fillText('タップしてタイトルへ', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 70);
+}
+
+function drawGameOverScreen() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#dc143c';
+    ctx.font = 'bold 48px Arial';
+    ctx.fillText('ゲームオーバー', GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    ctx.fillStyle = '#fff';
+    ctx.font = '24px Arial';
+    ctx.fillText('タップしてリトライ', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50);
+}
+
+// =================================================================================
+// 更新（ゲームロジック）関数
+// =================================================================================
+
+// ボールの移動と壁の衝突判定
+function moveBall() {
+    ball.x += ball.dx;
+    ball.y += ball.dy;
+
+    // 左右の壁
+    if (ball.x + ball.radius > GAME_WIDTH || ball.x - ball.radius < 0) {
+        ball.dx *= -1;
+    }
+    // 上の壁
+    if (ball.y - ball.radius < 0) {
+        ball.dy *= -1;
+    }
+    // 下の壁（ミス）
+    if (ball.y + ball.radius > GAME_HEIGHT) {
+        handleLifeLoss();
+    }
+}
+
+// パドルとの衝突判定
+function paddleCollision() {
+    if (ball.x > paddle.x &&
+        ball.x < paddle.x + paddle.width &&
+        ball.y + ball.radius > paddle.y &&
+        ball.y - ball.radius < paddle.y + paddle.height) {
+        
+        // パドルのどこに当たったかで反射角度を変える
+        let collidePoint = ball.x - (paddle.x + paddle.width / 2);
+        collidePoint = collidePoint / (paddle.width / 2); // -1 ~ 1 の値に正規化
+        
+        let angle = collidePoint * (Math.PI / 3); // 最大60度
+        ball.dx = ball.speed * Math.sin(angle);
+        ball.dy = -ball.speed * Math.cos(angle);
+    }
+}
+
+// ブロックとの衝突判定
+function brickCollision() {
+    bricks.forEach(brick => {
+        if (brick.status > 0) {
+            if (ball.x > brick.x &&
+                ball.x < brick.x + brick.width &&
+                ball.y > brick.y &&
+                ball.y < brick.y + brick.height) {
+                
+                ball.dy *= -1;
+                brick.status--;
+                score += 10;
+
+                if (brick.status === 0 && brick.hasItem) {
+                    // アイテムをドロップ
+                    const itemType = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+                    items.push({
+                        x: brick.x + brick.width / 2,
+                        y: brick.y + brick.height / 2,
+                        type: itemType.type,
+                        dy: 2
+                    });
+                }
+            }
+        }
+    });
+}
+
+// アイテムの移動と取得
+function updateItems() {
+    items.forEach((item, index) => {
+        item.y += item.dy;
+
+        // パドルとの衝突判定
+        if (item.y > paddle.y && item.y < paddle.y + paddle.height &&
+            item.x > paddle.x && item.x < paddle.x + paddle.width) {
+            applyItemEffect(item.type);
+            items.splice(index, 1); // アイテムを消す
+        }
+
+        // 画面外に出たら消す
+        if (item.y > GAME_HEIGHT) {
+            items.splice(index, 1);
+        }
+    });
+}
+
+// アイテムの効果を適用
+function applyItemEffect(type) {
+    switch (type) {
+        case 'expandPaddle':
+            paddle.width = Math.min(paddle.width + 40, 200);
+            // 一定時間後に元に戻す
+            setTimeout(() => {
+                paddle.width = paddle.originalWidth;
+            }, 8000);
+            break;
+        case 'slowBall':
+            const originalSpeed = ball.speed;
+            ball.speed = Math.max(2, ball.speed * 0.7);
+            updateBallVelocity();
+            // 一定時間後に元に戻す
+            setTimeout(() => {
+                ball.speed = originalSpeed;
+                updateBallVelocity();
+            }, 8000);
+            break;
+        case 'extraLife':
+            if (lives < 5) lives++;
+            break;
+    }
+}
+
+// ボールの速度ベクトルを更新
+function updateBallVelocity() {
+    const currentAngle = Math.atan2(ball.dy, ball.dx);
+    ball.dx = ball.speed * Math.cos(currentAngle);
+    ball.dy = ball.speed * Math.sin(currentAngle);
+}
+
+// ライフを失った時の処理
+function handleLifeLoss() {
+    // フクロウの救助が使える場合
+    if (owlRescueAvailable) {
+        owlRescueAvailable = false;
+        startOwlRescue();
+    } else {
+        lives--;
+        if (lives <= 0) {
+            gameState = 'gameOver';
+        } else {
+            resetBallAndPaddle();
+        }
+    }
+}
+
+// フクロウの救助アニメーションを開始
+function startOwlRescue() {
+    owl.isRescuing = true;
+    owl.x = ball.x;
+    owl.y = GAME_HEIGHT + 30;
+    owl.animationFrame = 0;
+
+    const rescueAnimation = () => {
+        if (!owl.isRescuing) return;
+
+        owl.animationFrame++;
+        
+        // フクロウが上昇してボールをキャッチ
+        if (owl.animationFrame < 60) {
+            owl.y -= 5;
+            ball.y = owl.y + owl.height / 2; // ボールをフクロウに追従させる
+        } 
+        // ボールを画面内に押し戻す
+        else if (owl.animationFrame < 120) {
+            owl.y -= 2;
+            ball.y = owl.y + owl.height / 2;
+        }
+        // アニメーション終了
+        else {
+            owl.isRescuing = false;
+            resetBallAndPaddle();
+            ball.y = paddle.y - 50; // 少し上から再開
+        }
+        requestAnimationFrame(rescueAnimation);
+    };
+    rescueAnimation();
+}
+
+
+// ステージクリアのチェック
+function checkStageClear() {
+    const remainingBricks = bricks.filter(b => b.status > 0).length;
+    if (remainingBricks === 0) {
+        score += 100; // ステージクリアボーナス
+        if (currentStage === stages.length - 1) {
+            gameState = 'gameClear';
+        } else {
+            gameState = 'stageClear';
+        }
+    }
+}
+
+// ゲームプレイ中の更新処理
+function update() {
+    if (gameState !== 'playing') return;
+
+    moveBall();
+    paddleCollision();
+    brickCollision();
+    updateItems();
+    checkStageClear();
+}
+
+// ゲーム全体の描画処理
+function draw() {
+    // 毎回クリア
+    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    
+    // 背景
+    ctx.fillStyle = '#0f0f1a';
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    drawStars();
+
+    if (gameState === 'title') {
+        drawTitleScreen();
+    } else if (gameState === 'stageSelect') {
+        drawStageSelectScreen();
+    } else if (gameState === 'playing') {
+        drawBricks();
+        drawPaddle();
+        drawBall();
+        drawItems();
+        drawOwl();
+        drawUI();
+    } else if (gameState === 'stageClear') {
+        // ゲーム画面の上に半透明のレイヤーを重ねる
+        drawBricks();
+        drawPaddle();
+        drawUI();
+        drawStageClearScreen();
+    } else if (gameState === 'gameClear') {
+        drawGameClearScreen();
+    } else if (gameState === 'gameOver') {
+        // ゲーム画面の上に半透明のレイヤーを重ねる
+        drawBricks();
+        drawPaddle();
+        drawUI();
+        drawGameOverScreen();
+    }
+}
+
+// =================================================================================
+// メインループ
+// =================================================================================
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// =================================================================================
+// イベントリスナー
+// =================================================================================
+
+// パドル操作（マウス）
+function mouseMoveHandler(e) {
+    const rect = canvas.getBoundingClientRect();
+    // スケールを考慮して座標を変換
+    const scaleX = canvas.width / GAME_WIDTH;
+    const relativeX = (e.clientX - rect.left) / scaleX;
+    
+    paddle.x = relativeX - paddle.width / 2;
+
+    // パドルが画面外に出ないように制限
+    if (paddle.x < 0) paddle.x = 0;
+    if (paddle.x + paddle.width > GAME_WIDTH) paddle.x = GAME_WIDTH - paddle.width;
+}
+
+// パドル操作（タッチ）
+function touchMoveHandler(e) {
+    e.preventDefault(); // 画面のスクロールを防ぐ
+    if (e.touches.length > 0) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / GAME_WIDTH;
+        const relativeX = (e.touches[0].clientX - rect.left) / scaleX;
+        
+        paddle.x = relativeX - paddle.width / 2;
+
+        if (paddle.x < 0) paddle.x = 0;
+        if (paddle.x + paddle.width > GAME_WIDTH) paddle.x = GAME_WIDTH - paddle.width;
+    }
+}
+
+// クリック/タップ処理
+function clickHandler(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / GAME_WIDTH;
+    const scaleY = canvas.height / GAME_HEIGHT;
+    const clickX = (e.clientX - rect.left) / scaleX;
+    const clickY = (e.clientY - rect.top) / scaleY;
+
+    if (gameState === 'title') {
+        gameState = 'stageSelect';
+    } 
+    else if (gameState === 'stageSelect') {
+        for (let i = 0; i < stages.length; i++) {
+            const btnY = GAME_HEIGHT / 2.5 + i * 80;
+            if (clickX > GAME_WIDTH / 2 - 100 && clickX < GAME_WIDTH / 2 + 100 &&
+                clickY > btnY && clickY < btnY + 60) {
+                currentStage = i;
+                resetLevel();
+                gameState = 'playing';
+                break;
+            }
+        }
+    }
+    else if (gameState === 'stageClear') {
+        currentStage++;
+        resetLevel();
+        gameState = 'playing';
+    } 
+    else if (gameState === 'gameClear' || gameState === 'gameOver') {
+        resetGame();
+    }
+}
+
+document.addEventListener('mousemove', mouseMoveHandler);
+document.addEventListener('touchmove', touchMoveHandler, { passive: false });
+canvas.addEventListener('click', clickHandler);
+canvas.addEventListener('touchstart', (e) => {
+    // clickイベントが発火しない場合があるので、touchstartでもハンドラを呼ぶ
+    // ただし、座標の取得方法が異なるので注意
+    const rect = canvas.getBoundingClientRect();
+    const clickEvent = {
+        clientX: e.touches[0].clientX,
+        clientY: e.touches[0].clientY
+    };
+    clickHandler(clickEvent);
+}, { passive: false });
+
+
+// =================================================================================
+// ゲーム開始
+// =================================================================================
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas(); // 初期ロード時にも実行
+resetGame();
+gameLoop();
+
+</script>
+
+</body>
+</html>
